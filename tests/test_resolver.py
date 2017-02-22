@@ -7,6 +7,7 @@ import pytest
 from twitter.common.contextutil import temporary_dir
 
 from pex.common import safe_copy
+from pex.crawler import Crawler
 from pex.fetcher import Fetcher
 from pex.package import EggPackage, SourcePackage
 from pex.resolvable import ResolvableRequirement
@@ -46,6 +47,49 @@ def test_diamond_local_resolve_cached():
     with temporary_dir() as cd:
       dists = resolve(['project1', 'project2'], fetchers=fetchers, cache=cd, cache_ttl=1000)
       assert len(dists) == 2
+
+
+def test_cached_dependency_pinned_unpinned_resolution_multi_run():
+  # This exercises the issue described here: https://github.com/pantsbuild/pex/issues/178
+  project1_0_0 = make_sdist(name='project', version='1.0.0')
+  project1_1_0 = make_sdist(name='project', version='1.1.0')
+
+  with temporary_dir() as td:
+    for sdist in (project1_0_0, project1_1_0):
+      safe_copy(sdist, os.path.join(td, os.path.basename(sdist)))
+    fetchers = [Fetcher([td])]
+    with temporary_dir() as cd:
+      # First run, pinning 1.0.0 in the cache
+      dists = resolve(['project', 'project==1.0.0'], fetchers=fetchers, cache=cd, cache_ttl=1000)
+      assert len(dists) == 1
+      assert dists[0].version == '1.0.0'
+      # This simulates separate invocations of pex but allows us to keep the same tmp cache dir
+      Crawler.reset_cache()
+      # Second, run, the unbounded 'project' req will find the 1.0.0 in the cache. But should also
+      # return SourcePackages found in td
+      dists = resolve(['project', 'project==1.1.0'], fetchers=fetchers, cache=cd, cache_ttl=1000)
+      assert len(dists) == 1
+      assert dists[0].version == '1.1.0'
+
+
+def test_resolve_prereleases():
+  stable_dep = make_sdist(name='dep', version='2.0.0')
+  prerelease_dep = make_sdist(name='dep', version='3.0.0rc3')
+
+  with temporary_dir() as td:
+    for sdist in (stable_dep, prerelease_dep):
+      safe_copy(sdist, os.path.join(td, os.path.basename(sdist)))
+    fetchers = [Fetcher([td])]
+
+    def assert_resolve(expected_version, **resolve_kwargs):
+      dists = resolve(['dep>=1,<4'], fetchers=fetchers, **resolve_kwargs)
+      assert 1 == len(dists)
+      dist = dists[0]
+      assert expected_version == dist.version
+
+    assert_resolve('2.0.0')
+    assert_resolve('2.0.0', allow_prereleases=False)
+    assert_resolve('3.0.0rc3', allow_prereleases=True)
 
 
 def test_resolvable_set():
