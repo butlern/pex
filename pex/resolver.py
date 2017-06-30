@@ -219,9 +219,7 @@ class Resolver(object):
     if not distributions:
       return dists
 
-    for resolvable, packages, parent, constraint_only in resolvable_set.packages():
-      if constraint_only:
-        continue
+    for resolvable, packages, parent in resolvable_set.packages():
       assert len(packages) > 0, 'ResolvableSet.packages(%s) should not be empty' % resolvable
       package = next(iter(packages))
       dists.append(distributions[package])
